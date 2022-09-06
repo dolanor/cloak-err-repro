@@ -1,0 +1,4 @@
+name: hugo
+extensions:
+  - path: .
+    sdk: go
