@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 
-	"github.com/dagger/cloak/sdk/go/dagger"
+	"ci/hugo/gen/core"
+
+	"github.com/dagger/cloak/engine"
 )
 
 func (r *query) hugo(ctx context.Context) (*Hugo, error) {
@@ -17,35 +19,57 @@ type query struct{}
 type hugo struct{}
 
 func main() {
-	dagger.Serve(context.Background(), map[string]func(context.Context, dagger.ArgsInput) (interface{}, error){
-		"Query.hugo": func(ctx context.Context, fc dagger.ArgsInput) (interface{}, error) {
-			var bytes []byte
-			_ = bytes
-			var err error
-			_ = err
+	ctx := context.Background()
+	cfg := engine.Config{
+		ConfigPath: "./cloak.yml",
+		Workdir:    ".",
+	}
+	err := engine.Start(ctx, &cfg, func(ctx engine.Context) error {
+		deb, err := core.Image(ctx, "alpine:latest")
+		if err != nil {
+			return (err)
+		}
 
-			return (&query{}).hugo(ctx)
-		},
-		"hugo.generate": func(ctx context.Context, fc dagger.ArgsInput) (interface{}, error) {
-			var bytes []byte
-			_ = bytes
-			var err error
-			_ = err
+		curled, err := core.Exec(ctx, deb.Core.Image.ID, core.ExecInput{
+			Args: []string{"sh", "-c", "apk add curl && curl -L https://github.com/gohugoio/hugo/releases/download/v0.102.3/hugo_0.102.3_Linux-64bit.tar.gz | tar -xz"},
+			//Args: []string{"sh", "/mnt/run.sh"},
+			//Mounts: []core.MountInput{
+			//	{Fs: wdID, Path: "/mnt"},
+			//},
+		})
+		if err != nil {
+			return fmt.Errorf("in curl: %w", err)
+		}
 
-			var src dagger.FSID
+		wd, err := core.Workdir(ctx)
+		if err != nil {
+			return err
+		}
 
-			bytes, err = json.Marshal(fc.Args["src"])
-			if err != nil {
-				return nil, err
-			}
-			if err := json.Unmarshal(bytes, &src); err != nil {
-				return nil, err
-			}
+		wdID := wd.Host.Workdir.Read.ID
+		_ = wdID
 
-			return (&hugo{}).generate(ctx,
+		execResp, err := core.Exec(ctx, curled.Core.Filesystem.ID, core.ExecInput{
+			Args: []string{"/hugo", "--help"},
+			//Mounts: []core.MountInput{
+			//	{
+			//		Fs:   wdID,
+			//		Path: "/mnt",
+			//	},
+			//},
+			Workdir: "/",
+		})
+		if err != nil {
+			return fmt.Errorf("in final: %w", err)
+		}
 
-				src,
-			)
-		},
+		outFS := execResp.Core.Filesystem
+
+		println(outFS.Exec.Stdout)
+		return nil
 	})
+	if err != nil {
+		panic(err)
+	}
+
 }
